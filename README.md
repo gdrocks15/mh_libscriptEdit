@@ -16,3 +16,5 @@ It is possible to change from NIST Webbook to Pubchem REST API without a lot of 
 
 Also, changing from "AlternateNames (shown as "Other Names:" on webpage) will allow you to retrieve a different field.
 For some additional info on that, I uploaded an "enumerate_properties" script that will assist with that.
+
+All scripts being added are xxxxx.libedit.script
