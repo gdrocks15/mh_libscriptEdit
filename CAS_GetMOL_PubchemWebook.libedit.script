@@ -1,0 +1,217 @@
+///////////////////////////////////////////////////////////////////////////////
+// NistPubchemMOLFallback - Downloads 2D structure MOL layouts directly into 
+// MassHunter Library fields.
+// Features isolated UriBuilder construction to guarantee URL path accuracy.
+// Script will attempt to pull from Webbook first, then try to pull from Pubchem
+// See steps 4 and 5
+///////////////////////////////////////////////////////////////////////////////
+
+//! <script>
+//!  <language>CSharp</language>
+//!  <reference>System.Drawing.dll</reference>
+//!  <reference>System.Xml.dll</reference>
+//!  <import>System</import>
+//!  <import>System.Drawing</import>
+//!  <import>System.Text</import>
+//!  <import>System.IO</import>
+//!  <import>System.Text.RegularExpressions</import>
+//!  <import>System.Collections.Generic</import>
+//!  <import>System.Net</import>
+//!  <import>System.Windows.Forms</import>
+//!  <import>System.Xml</import>
+//!  <import>System.Xml.XPath</import>
+//! </script>
+
+int substanceCount = this.MainForm.CompoundGridPane.RowCount;
+string message = "";
+int timeOutMs = 10000; 
+
+this.ScriptProgress.Marquee = false;
+this.ScriptProgress.ProgressStep = 1;
+this.ScriptProgress.ProgressMaximum = substanceCount;
+System.Text.StringBuilder builder = new System.Text.StringBuilder();
+
+// Configure network security standards
+ServicePointManager.Expect100Continue = true;
+ServicePointManager.DefaultConnectionLimit = 9999;
+ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+// Validate standard CAS formatting structure
+Regex casRegex = new Regex(@"\b[1-9]{1}[0-9]{1,5}-\d{2}-\d\b");
+
+for (int i = 0; i < substanceCount; i++)
+{
+  int compoundId = MainForm.CompoundGridPane.GetCompoundId(i);
+  message = "Compound ID - " + compoundId;
+  this.ScriptProgress.Message = message;
+  this.ScriptProgress.ProgressValue = i + 1;
+
+  // 1. Skip if compound already has an embedded MOL file block
+  string molFile = (string)LibraryAccess.GetCompoundProperty(compoundId, "MolFile");
+  if (!string.IsNullOrEmpty(molFile))
+  {
+    message += ": MolFile value already exists.";
+    this.ScriptProgress.Message = message;
+    builder.AppendLine(message);
+    continue;
+  }
+
+  // 2. Collect CAS parameter and safely trim it
+  object rawCas = LibraryAccess.GetCompoundProperty(compoundId, "CASNumber");
+  string casNum = (rawCas != null) ? rawCas.ToString().Trim() : "";
+
+  // 3. Verify CAS format is structurally valid before executing network requests
+  if (string.IsNullOrEmpty(casNum) || !casRegex.IsMatch(casNum))
+  {
+    message += ": Skipped (CAS field is empty or placeholder).";
+    this.ScriptProgress.Message = message;
+    builder.AppendLine(message);
+    continue;
+  }
+
+  bool structureFound = false;
+  string retrievedMolText = "";
+  string sourceDatabase = "";
+
+  // 4. ATTEMPT 1: NIST WebBook (Constructed using absolute URI properties)
+  System.Net.WebRequest request = null;
+  System.Net.WebResponse response = null;
+  System.IO.Stream stream = null;
+  System.IO.StreamReader reader = null;
+
+  try
+  {
+    string cleanCasDigits = casNum.Replace("-", "");
+    
+    // Explicitly separating Host, Path, and Query properties to prevent string merging bugs
+    UriBuilder nistBuilder = new UriBuilder();
+    nistBuilder.Scheme = "https";
+    nistBuilder.Host = "webbook.nist.gov";
+    nistBuilder.Path = "cgi/cbook.cgi";
+    nistBuilder.Query = "Str2D=C" + cleanCasDigits;
+    
+    Uri finalNistUri = nistBuilder.Uri;
+    
+    // Log the exact URL being sent to the network layer
+    builder.AppendLine("Compound ID - " + compoundId + " | Generated NIST URL: " + finalNistUri.AbsoluteUri);
+    this.ScriptProgress.Message = "Querying NIST (" + casNum + ")...";
+
+    request = System.Net.WebRequest.Create(finalNistUri);
+    request.Timeout = timeOutMs;
+    
+    response = request.GetResponse();
+    stream = response.GetResponseStream();
+    reader = new System.IO.StreamReader(stream);
+    string nistResponseText = reader.ReadToEnd();
+
+    if (!string.IsNullOrEmpty(nistResponseText) && nistResponseText.Contains("V2000"))
+    {
+      retrievedMolText = nistResponseText;
+      structureFound = true;
+      sourceDatabase = "NIST WebBook";
+    }
+  }
+  catch (Exception ex)
+  {
+    builder.AppendLine("Compound ID - " + compoundId + " -> NIST Error: " + ex.Message);
+  }
+  finally
+  {
+    if (null != reader) reader.Close();
+    if (null != stream) stream.Close();
+    if (null != response) response.Close();
+  }
+
+  // 5. ATTEMPT 2: PubChem Fallback (Constructed using absolute URI properties)
+  if (!structureFound)
+  {
+    request = null;
+    response = null;
+    stream = null;
+    reader = null;
+
+    try
+    {
+      // Explicitly separating Host and Path parameters
+      UriBuilder pubchemBuilder = new UriBuilder();
+      pubchemBuilder.Scheme = "https";
+      pubchemBuilder.Host = "pubchem.ncbi.nlm.nih.gov";
+      pubchemBuilder.Path = "rest/pug/compound/name/" + casNum + "/SDF";
+      
+      Uri finalPubchemUri = pubchemBuilder.Uri;
+
+      // Log the exact URL being sent to the network layer
+      builder.AppendLine("Compound ID - " + compoundId + " | Generated PubChem URL: " + finalPubchemUri.AbsoluteUri);
+      this.ScriptProgress.Message = "Falling back to PubChem...";
+
+      request = System.Net.WebRequest.Create(finalPubchemUri);
+      request.Timeout = timeOutMs;
+      
+      response = request.GetResponse();
+      stream = response.GetResponseStream();
+      reader = new System.IO.StreamReader(stream);
+      string pubchemResponseText = reader.ReadToEnd();
+
+      if (!string.IsNullOrEmpty(pubchemResponseText) && !pubchemResponseText.StartsWith("Status:") && pubchemResponseText.Contains("V2000"))
+      {
+        retrievedMolText = pubchemResponseText;
+        structureFound = true;
+        sourceDatabase = "PubChem Fallback";
+      }
+    }
+    catch (Exception ex)
+    {
+      builder.AppendLine("Compound ID - " + compoundId + " -> PubChem Error: " + ex.Message);
+    }
+    finally
+    {
+      if (null != reader) reader.Close();
+      if (null != stream) stream.Close();
+      if (null != response) response.Close();
+    }
+  }
+
+  // 6. Final Stage: Inject payload or log total failure
+  if (structureFound && !string.IsNullOrEmpty(retrievedMolText))
+  {
+    try
+    {
+      SetCompoundProperty(
+        new Agilent.MassSpectrometry.DataAnalysis.LibraryEdit.Commands.CompoundProperty[]{
+          new Agilent.MassSpectrometry.DataAnalysis.LibraryEdit.Commands.CompoundProperty(compoundId, "MolFile", retrievedMolText)
+        });
+
+      builder.AppendLine("Compound ID - " + compoundId + ": SUCCESS via " + sourceDatabase);
+    }
+    catch (Exception ex)
+    {
+      builder.AppendLine("Compound ID - " + compoundId + ": Database Write Error: " + ex.Message);
+    }
+  }
+  else
+  {
+    builder.AppendLine("Compound ID - " + compoundId + ": FAILED. Structure not found for CAS " + casNum);
+  }
+}
+
+// Visual summary dialog window
+Form summaryForm = new System.Windows.Forms.Form();
+summaryForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+summaryForm.MinimizeBox = false;
+summaryForm.MaximizeBox = false;
+summaryForm.ShowIcon = false;
+summaryForm.ShowInTaskbar = false;
+summaryForm.Text = "NIST / PubChem Dual-Engine URL Verification Summary";
+summaryForm.Size = new Size(850, 500);
+
+TextBox textBox = new System.Windows.Forms.TextBox();
+textBox.ReadOnly = true;
+textBox.Dock = System.Windows.Forms.DockStyle.Fill;
+textBox.Multiline = true;
+textBox.WordWrap = false;
+textBox.ScrollBars = System.Windows.Forms.ScrollBars.Both;
+textBox.Text = builder.ToString();
+textBox.Select(0, 0);
+
+summaryForm.Controls.Add(textBox);
+summaryForm.ShowDialog(MainForm);
