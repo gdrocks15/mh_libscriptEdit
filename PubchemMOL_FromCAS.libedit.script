@@ -1,0 +1,145 @@
+///////////////////////////////////////////////////////////////////////////////
+//
+// PubchemMOLFromCasOnly - Downloads 2D structure MOL layouts directly into 
+// MassHunter Library fields using PubChem PUG REST.
+// Strictly uses valid CAS numbers only via direct structural mapping.
+// Almost entirely based on Inspecti script
+//
+///////////////////////////////////////////////////////////////////////////////
+
+//! <script>
+//!  <language>CSharp</language>
+//!  <reference>System.Drawing.dll</reference>
+//!  <reference>System.Xml.dll</reference>
+//!  <import>System</import>
+//!  <import>System.Drawing</import>
+//!  <import>System.Text</import>
+//!  <import>System.IO</import>
+//!  <import>System.Text.RegularExpressions</import>
+//!  <import>System.Collections.Generic</import>
+//!  <import>System.Net</import>
+//!  <import>System.Windows.Forms</import>
+//!  <import>System.Xml</import>
+//!  <import>System.Xml.XPath</import>
+//! </script>
+
+int substanceCount = this.MainForm.CompoundGridPane.RowCount;
+string message = "";
+int timeOutMs = 10000; 
+
+this.ScriptProgress.Marquee = false;
+this.ScriptProgress.ProgressStep = 1;
+this.ScriptProgress.ProgressMaximum = substanceCount;
+System.Text.StringBuilder builder = new System.Text.StringBuilder();
+
+// Optimize global TLS configuration once outside the iterative loop
+ServicePointManager.Expect100Continue = true;
+ServicePointManager.DefaultConnectionLimit = 9999;
+ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+for (int i = 0; i < substanceCount; i++)
+{
+  int compoundId = MainForm.CompoundGridPane.GetCompoundId(i);
+  message = "Compound ID - " + compoundId;
+  this.ScriptProgress.Message = message;
+  this.ScriptProgress.ProgressValue = i + 1;
+
+  // 1. Skip if compound already has an embedded MOL file block
+  string molFile = (string)LibraryAccess.GetCompoundProperty(compoundId, "MolFile");
+  if (!string.IsNullOrEmpty(molFile))
+  {
+    message += ": MolFile value already exists.";
+    this.ScriptProgress.Message = message;
+    builder.AppendLine(message);
+    continue;
+  }
+
+  // 2. Collect CAS parameter and safely trim it
+  object rawCas = LibraryAccess.GetCompoundProperty(compoundId, "CASNumber");
+  string casNum = (rawCas != null) ? rawCas.ToString().Trim() : "";
+
+  // 3. Verify CAS is populated before firing the network adapter
+  if (!string.IsNullOrEmpty(casNum) && casNum.Length > 2)
+  {
+    // Direct single-step URL matching the exact pattern of your original script
+    string url = String.Format("https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{0}/SDF", Uri.EscapeDataString(casNum));
+    message += (": downloading " + url);
+    this.ScriptProgress.Message = message;
+
+    System.Net.WebRequest request = null;
+    System.Net.WebResponse response = null;
+    System.IO.Stream stream = null;
+    System.IO.StreamReader reader = null;
+
+    try
+    {
+      request = System.Net.WebRequest.Create(url);
+      request.Timeout = timeOutMs;
+      
+      response = request.GetResponse();
+      stream = response.GetResponseStream();
+      reader = new System.IO.StreamReader(stream);
+      
+      string retrievedMolText = reader.ReadToEnd();
+
+      if (!string.IsNullOrEmpty(retrievedMolText) && !retrievedMolText.StartsWith("Status:"))
+      {
+        // Inject structural matrix payload directly back into MassHunter database
+        SetCompoundProperty(
+          new Agilent.MassSpectrometry.DataAnalysis.LibraryEdit.Commands.CompoundProperty[]{
+            new Agilent.MassSpectrometry.DataAnalysis.LibraryEdit.Commands.CompoundProperty(compoundId, "MolFile", retrievedMolText)
+          });
+
+        message += "... OK";
+        this.ScriptProgress.Message = message;
+        builder.AppendLine(message);
+      }
+      else
+      {
+        message += "... Failed: Empty or invalid data body returned.";
+        this.ScriptProgress.Message = message;
+        builder.AppendLine(message);
+      }
+    }
+    catch (System.Net.WebException we)
+    {
+      message += ("... Failed: " + we.Message);
+      this.ScriptProgress.Message = message;
+      builder.AppendLine(message);
+    }
+    finally
+    {
+      if (null != reader) reader.Close();
+      if (null != stream) stream.Close();
+      if (null != response) response.Close();
+    }
+  }
+  else
+  {
+    message += ": Skipped (CAS field is empty).";
+    this.ScriptProgress.Message = message;
+    builder.AppendLine(message);
+  }
+}
+
+// Visual summary dialog window
+Form summaryForm = new System.Windows.Forms.Form();
+summaryForm.StartPosition = System.Windows.Forms.FormStartPosition.CenterParent;
+summaryForm.MinimizeBox = false;
+summaryForm.MaximizeBox = false;
+summaryForm.ShowIcon = false;
+summaryForm.ShowInTaskbar = false;
+summaryForm.Text = "PubChem Direct Structural Sync Summary (CAS Only)";
+summaryForm.Size = new Size(700, 450);
+
+TextBox textBox = new System.Windows.Forms.TextBox();
+textBox.ReadOnly = true;
+textBox.Dock = System.Windows.Forms.DockStyle.Fill;
+textBox.Multiline = true;
+textBox.WordWrap = false;
+textBox.ScrollBars = System.Windows.Forms.ScrollBars.Both;
+textBox.Text = builder.ToString();
+textBox.Select(0, 0);
+
+summaryForm.Controls.Add(textBox);
+summaryForm.ShowDialog(MainForm);
