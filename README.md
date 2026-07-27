@@ -1,5 +1,9 @@
 # mh_libscriptEdit - Import NIST Webbook
 Agilent Masshunter Quant 10.x Library Editor - Updated version of Chemspider OEM MOL retrieval script
+Massive credit due for Inspecti
+https://github.com/Inspecti/masshunter-scripts
+I also used Copilot for additional reviews while making these scripts.
+
 NistWebBook Compound Data Import
 Formula and MolecularWeight are extracted from NIST WebBook JSON-LD metadata.
 AlternateNames are extracted from the NIST "Other names" field.
