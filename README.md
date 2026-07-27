@@ -77,8 +77,10 @@ Potential future enhancements include:
   - Pubchem
   - NIST Webbook
   - Chemspider
-  - the Good Scents Compny
+  - the Good Scents Company
   - scentsandflavors database
+
+- Explore possibility of converting script from library editor to Unknown analysis or Qual
 
 ## References
 - Agilent MassHunter Quantitative Analysis 10.1 and 10.2
@@ -89,3 +91,6 @@ Potential future enhancements include:
   - https://pubchem.ncbi.nlm.nih.gov/docs/pug-rest
 - Inspecti MassHunter Scripts
   - https://github.com/Inspecti/masshunter-scripts
+- Agilent OEM script "DownloadMOLfilesfromChemspider.libedit.script"
+  - This original script became obsolete due to changes to Chemspider API, likely doesn't ship with newer versions of Masshunter Quantitative Analysis.
+  - Script is protected by copyright
