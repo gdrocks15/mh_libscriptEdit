@@ -1,0 +1,236 @@
+///////////////////////////////////////////////////////////////////////////////
+// NistWebBookAlternateNames
+// Retrieves NIST WebBook "Other names" field using CAS number
+// and stores it in AlternateNames.
+///////////////////////////////////////////////////////////////////////////////
+
+//! <script>
+//!  <language>CSharp</language>
+//!  <reference>System.Drawing.dll</reference>
+//!  <reference>System.Xml.dll</reference>
+//!  <import>System</import>
+//!  <import>System.Drawing</import>
+//!  <import>System.Text</import>
+//!  <import>System.IO</import>
+//!  <import>System.Text.RegularExpressions</import>
+//!  <import>System.Collections.Generic</import>
+//!  <import>System.Net</import>
+//!  <import>System.Windows.Forms</import>
+//! </script>
+
+int substanceCount = this.MainForm.CompoundGridPane.RowCount;
+
+string message = "";
+int timeOutMs = 50000;
+
+this.ScriptProgress.Marquee = false;
+this.ScriptProgress.ProgressStep = 1;
+this.ScriptProgress.ProgressMaximum = substanceCount;
+
+StringBuilder builder = new StringBuilder();
+
+ServicePointManager.Expect100Continue = true;
+ServicePointManager.DefaultConnectionLimit = 9999;
+ServicePointManager.SecurityProtocol =
+    SecurityProtocolType.Tls11 |
+    SecurityProtocolType.Tls12 |
+    SecurityProtocolType.Tls13;
+
+Regex casRegex =
+    new Regex(@"^[1-9]\d{1,5}-\d{2}-\d$");
+
+for (int i = 0; i < substanceCount; i++)
+{
+    int compoundId =
+        MainForm.CompoundGridPane.GetCompoundId(i);
+
+    message =
+        "Compound ID - " + compoundId;
+
+    this.ScriptProgress.Message = message;
+    this.ScriptProgress.ProgressValue = i + 1;
+
+    try
+    {
+        // Skip if AlternateNames already populated
+
+        object existingAltNames =
+            LibraryAccess.GetCompoundProperty(
+                compoundId,
+                "AlternateNames");
+
+        if (existingAltNames != null &&
+            existingAltNames.ToString().Trim().Length > 0)
+        {
+            builder.AppendLine(
+                "Compound ID - " +
+                compoundId +
+                ": AlternateNames already exists.");
+
+            continue;
+        }
+
+        // Get CAS
+
+        object rawCas =
+            LibraryAccess.GetCompoundProperty(
+                compoundId,
+                "CASNumber");
+
+        string casNum =
+            (rawCas != null)
+                ? rawCas.ToString().Trim()
+                : "";
+
+        if (String.IsNullOrEmpty(casNum) ||
+            !casRegex.IsMatch(casNum))
+        {
+            builder.AppendLine(
+                "Compound ID - " +
+                compoundId +
+                ": Invalid CAS.");
+
+            continue;
+        }
+
+        string cleanCasDigits =
+            casNum.Replace("-", "");
+
+        UriBuilder nistBuilder =
+            new UriBuilder();
+
+        nistBuilder.Scheme = "https";
+        nistBuilder.Host = "webbook.nist.gov";
+        nistBuilder.Path = "cgi/cbook.cgi";
+        nistBuilder.Query =
+            "ID=C" + cleanCasDigits;
+
+        Uri finalNistUri =
+            nistBuilder.Uri;
+
+        builder.AppendLine(
+            "Compound ID - " +
+            compoundId +
+            " | " +
+            finalNistUri.AbsoluteUri);
+
+        HttpWebRequest request =
+            (HttpWebRequest)WebRequest.Create(finalNistUri);
+
+        request.Timeout = timeOutMs;
+        request.UserAgent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)";
+        request.Accept = "*/*";
+        request.KeepAlive = false;
+        request.Proxy = null;
+
+        string html = "";
+
+        using (HttpWebResponse response =
+            (HttpWebResponse)request.GetResponse())
+        using (Stream stream =
+            response.GetResponseStream())
+        using (StreamReader reader =
+            new StreamReader(stream))
+        {
+            html = reader.ReadToEnd();
+        }
+
+        string alternateNames = "";
+        int maxAlternateNames = 10;
+
+        int startPos =
+            html.IndexOf("<li><strong>Other names:</strong>",StringComparison.OrdinalIgnoreCase);
+
+        if (startPos >= 0)
+        {
+            startPos +=
+                "<li><strong>Other names:</strong>".Length;
+
+            int endPos = html.IndexOf("</li>",startPos,StringComparison.OrdinalIgnoreCase);
+
+            if (endPos > startPos)
+            {
+                alternateNames =
+                    html.Substring(startPos,endPos - startPos);
+
+                alternateNames =
+                    Regex.Replace(alternateNames,@"\s+"," ");
+
+                alternateNames = alternateNames.Replace("\r", " ").Replace("\n", " ");
+
+                alternateNames = WebUtility.HtmlDecode(alternateNames);
+
+                alternateNames = alternateNames.Trim();
+
+                // Keep only first 10 alternate names
+
+                string[] names =
+                    alternateNames.Split(new string[] { ";" },StringSplitOptions.RemoveEmptyEntries);
+
+                List<string> topNames =
+                    new List<string>();
+
+                for (int n = 0;
+                    n < names.Length && n < maxAlternateNames;
+                    n++)
+                {
+                    topNames.Add(names[n].Trim());
+                }
+
+                alternateNames =
+                    String.Join("; ",topNames.ToArray());
+            }
+        }
+
+        if (!String.IsNullOrEmpty(alternateNames))
+        {
+            SetCompoundProperty(
+                new Agilent.MassSpectrometry.DataAnalysis.LibraryEdit.Commands.CompoundProperty[]
+                {
+                    new Agilent.MassSpectrometry.DataAnalysis.LibraryEdit.Commands.CompoundProperty(
+                        compoundId,"AlternateNames",alternateNames)
+                });
+
+            builder.AppendLine(
+                "Compound ID - " + compoundId + ": SUCCESS");
+        }
+        else
+        {
+            builder.AppendLine(
+                "Compound ID - " + compoundId + ": No alternate names found.");
+        }
+    }
+    catch (Exception ex)
+    {
+        builder.AppendLine(
+            "Compound ID - " + compoundId + ": ERROR - " + ex.Message);
+    }
+}
+
+Form summaryForm = new Form();
+
+summaryForm.StartPosition = FormStartPosition.CenterParent;
+
+summaryForm.MinimizeBox = false;
+summaryForm.MaximizeBox = false;
+summaryForm.ShowIcon = false;
+summaryForm.ShowInTaskbar = false;
+
+summaryForm.Text = "NIST Alternate Names Import";
+
+summaryForm.Size = new Size(900, 600);
+
+TextBox textBox = new TextBox();
+
+textBox.ReadOnly = true;
+textBox.Dock = DockStyle.Fill;
+textBox.Multiline = true;
+textBox.WordWrap = false;
+textBox.ScrollBars = ScrollBars.Both;
+textBox.Text = builder.ToString();
+textBox.Select(0, 0);
+
+summaryForm.Controls.Add(textBox);
+
+summaryForm.ShowDialog(MainForm);
