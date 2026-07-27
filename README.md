@@ -11,9 +11,11 @@ I also used Copilot for additional reviews while making these scripts.
 
 Scripts are executed from Library Editor by opening a writable custom library (not a locked `.L` library) and selecting:  
   Tools → Run Script...
+  
 Recommended script location:
+```
   [Install drive]\MassHunter\Scripts\LibraryEdit
-
+```
 ## CAS Normalization
 CAS normalization converts a valid `[CAS#]` number into a digit-only format by removing hyphens.
 
@@ -55,7 +57,9 @@ Additional Information:
 - All scripts in this repository use the `.libedit.script` extension.
 
 ### 5. Possible Routes for Future Updates
-Potential future enhancements include retrieval of flavor or odor descriptions from:
+Potential future enhancements include: 
+
+- Retrieval of flavor or odor descriptions from:
   - The Good Scents Company
   - Perflavory
   - Scents and Flavors
@@ -63,6 +67,18 @@ Potential future enhancements include retrieval of flavor or odor descriptions f
   - Scentree
   - FlavScents
   - FEMA Flavor Library
+
+- Retrieval of FEMA reference numbers
+  - Could pull from FEMA flavor library
+  - Pubchem
+  - Local excel file
+
+- Add retrieval of Boiling Point and/or Melting Point
+  - Pubchem
+  - NIST Webbook
+  - Chemspider
+  - the Good Scents Compny
+  - scentsandflavors database
 
 ## References
 - Agilent MassHunter Quantitative Analysis 10.1 and 10.2
